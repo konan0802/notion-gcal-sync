@@ -1,0 +1,379 @@
+# Notion-Google Calendar 同期ツール開発ルール
+
+## プロジェクト概要
+
+NotionのタスクデータベースとGoogle Calendarを双方向で自動同期するGoogle Apps Script (GAS)ツール。
+
+## 必須参照ドキュメント
+
+### リポジトリ内ドキュメント
+
+以下のファイルを常に参照してください：
+
+1. **@README.md** - プロジェクト全体の設計、アーキテクチャ、セットアップ手順
+2. **@NOTION_DB_SCHEMA.md** - Notionデータベースの構造（プロパティ、型、データ例）
+3. **@API_TEST.md** - Notion APIとGoogle Calendar APIの手動テストガイド
+
+### 実装ファイル
+
+5. **@gas/TaskData.gs** - 共通データ型（TaskData）と変換ユーティリティ
+6. **@gas/NotionService.gs** - Notion API (v2025-09-03) 通信サービス
+7. **@gas/GoogleCalendarService.gs** - Google Calendar API (v3) 通信サービス
+
+### 外部APIリファレンス
+
+コード実装時は必ず以下の公式APIリファレンスを参照してください：
+
+#### Notion API v2025-09-03（Data Sources API）
+- **概要**: https://developers.notion.com/reference/intro
+- **バージョニング**: https://developers.notion.com/reference/versioning
+- **Data Sources API**:
+  - Query a data source: https://developers.notion.com/reference/query-a-data-source
+  - Retrieve a data source: https://developers.notion.com/reference/retrieve-a-data-source
+- **Pages API**:
+  - Create a page: https://developers.notion.com/reference/post-page
+  - Retrieve a page: https://developers.notion.com/reference/retrieve-a-page
+  - Update page: https://developers.notion.com/reference/patch-page
+- **Blocks API**:
+  - Retrieve block children: https://developers.notion.com/reference/get-block-children
+  - Append block children: https://developers.notion.com/reference/patch-block-children
+  - Delete a block: https://developers.notion.com/reference/delete-a-block
+- **Data Source Properties**: https://developers.notion.com/reference/data-source-properties
+- **Rate limits**: https://developers.notion.com/reference/request-limits
+
+#### Google Calendar API v3
+- **概要**: https://developers.google.com/calendar/api/v3/reference
+- **Events リソース**:
+  - list: https://developers.google.com/calendar/api/v3/reference/events/list
+  - get: https://developers.google.com/calendar/api/v3/reference/events/get
+  - insert: https://developers.google.com/calendar/api/v3/reference/events/insert
+  - update: https://developers.google.com/calendar/api/v3/reference/events/update
+  - patch: https://developers.google.com/calendar/api/v3/reference/events/patch
+  - delete: https://developers.google.com/calendar/api/v3/reference/events/delete
+- **Calendars リソース**: https://developers.google.com/calendar/api/v3/reference/calendars
+
+#### Google Apps Script
+- **Calendar Service**: https://developers.google.com/apps-script/advanced/calendar
+- **PropertiesService**: https://developers.google.com/apps-script/reference/properties/properties-service
+
+## 技術スタック
+
+- **実行環境**: Google Apps Script (GAS)
+- **言語**: JavaScript (ES6+)
+- **API**: 
+  - Notion API v2025-09-03 (Data Sources API)
+  - Google Calendar API v3
+- **状態管理**: PropertiesService（設定情報、IDマッピング）
+- **トリガー**: 時間主導型（5分ごと推奨）
+
+## 重要な制限事項
+
+### Notion API
+- バージョン: **v2025-09-03必須**（Data Sources API使用）
+- レートリミット: 平均3リクエスト/秒（連続リクエスト時は350ms以上の間隔）
+- Database ID → Data Source IDの変換が必要
+- ページ本文（blocks）は別APIで取得（`/blocks/{page_id}/children`）
+- Blocks API: 最大100ブロック/リクエスト
+
+### Google Calendar API
+- レートリミット: 1,000,000 クエリ/日、100リクエスト/秒/ユーザー
+- 開始時刻・終了時刻を完全サポート
+- `description`フィールド: Notion Page IDとURLを格納
+
+### GAS
+- 実行時間制限: 6分/回
+- 1回の実行で最大250件のイベント/ページを処理（推奨）
+
+## コーディング規約
+
+### ファイル構成
+
+```
+gas/
+├── TaskData.gs              # 共通データ型と変換ロジック
+├── NotionService.gs         # Notion API専用
+├── GoogleCalendarService.gs # Google Calendar API専用
+└── Code.gs                  # メイン同期ロジック
+```
+
+### データフロー
+
+```
+Notion Page (API Response)
+  ↓ TaskDataConverter.fromNotionPage(page)
+TaskData (統一形式)
+  ↓ TaskDataConverter.toGoogleEvent(taskData)
+Google Calendar Event (API Request)
+```
+
+```
+Google Calendar Event (API Response)
+  ↓ TaskDataConverter.fromGoogleEvent(googleEvent)
+TaskData (統一形式)
+  ↓ TaskDataConverter.toNotionProperties(taskData)
+Notion Page Properties (API Request)
+```
+
+### 命名規則
+
+- **関数名**: camelCase（例: `getPageContent`, `createTask`）
+- **定数**: UPPER_SNAKE_CASE（例: `NOTION_CONFIG`, `API_VERSION`）
+- **プライベート関数**: 先頭アンダースコアなし（GASにはプライベートスコープがない）
+- **テスト関数**: `test`プレフィックス（例: `testListAllTasks`）
+
+### エラーハンドリング
+
+```javascript
+try {
+  const response = notionApiRequest(endpoint, options);
+  // 処理
+} catch (error) {
+  Logger.log(`[ServiceName] Error: ${error.message}`);
+  throw error; // または適切な処理
+}
+```
+
+### ログ出力
+
+```javascript
+Logger.log(`[ServiceName] メッセージ内容`);
+```
+
+サービス名プレフィックス：
+- `[NotionService]`
+- `[GoogleCalendarService]`
+- `[TaskDataConverter]`
+
+### レートリミット対策
+
+```javascript
+// Notion API
+waitForRateLimit(); // 350ms待機
+
+// Google Calendar API
+// 通常は不要（十分な余裕あり）
+```
+
+### JSDoc
+
+全ての関数にJSDocコメントを記述：
+
+```javascript
+/**
+ * 関数の説明
+ * @param {string} paramName - パラメータの説明
+ * @returns {Object} 戻り値の説明
+ */
+function functionName(paramName) {
+  // 実装
+}
+```
+
+## TaskData型定義
+
+```typescript
+@typedef {Object} TaskData
+@property {string} id - データソースのプライマリID（Notion Page ID または Google Event ID）
+@property {string} title - タスク名（双方向同期）
+@property {string} status - ステータス（双方向同期）: ToDo/Done
+@property {string|null} startTime - 開始時刻（双方向同期）: ISO 8601形式（日時含む）
+@property {string|null} endTime - 終了時刻（双方向同期）: ISO 8601形式（日時含む）
+@property {string} lastEditedTime - 最終編集日時（同期判定用）: ISO 8601形式
+@property {string|null} notionUrl - NotionページURL（Notion → Google Calendarのdescription）
+@property {string|null} googleEventId - Google Calendar Event ID（マッピング用）
+@property {string|null} notionPageId - Notion Page ID（削除判定用）
+@property {string} source - データソース: 'notion' | 'google'
+```
+
+## 同期対象
+
+- **タイトル**: Notion「タスク名」 ↔ Google Calendar「summary」
+- **ステータス**: Notion「ステータス」(ToDo/Done) ↔ Google Calendar（将来実装予定）
+- **開始時刻**: Notion「日付.start」(ISO 8601) ↔ Google Calendar「start.dateTime」(RFC 3339)
+- **終了時刻**: Notion「日付.end」(ISO 8601) ↔ Google Calendar「end.dateTime」(RFC 3339)
+- **ID相互参照**:
+  - Notion→Google: 「Google Event ID」プロパティ（rich_text）
+  - Google→Notion: `description`フィールドに`Notion: {pageId}\n{url}`を格納
+
+## テスト
+
+### 単体テスト関数
+
+各サービスに`test*`関数を実装：
+
+```javascript
+// NotionService.gs
+testQueryRecentTasks()
+testCreatePage()
+testUpdatePage()
+testDebugTaskDateTime()
+runAllNotionTests()
+
+// GoogleCalendarService.gs
+testListRecentEvents()
+testCreateEvent()
+testTaskDataConverterForCalendar()
+testDebugGoogleEventDateTime()
+runAllGoogleCalendarTests()
+```
+
+### テスト実行前の準備
+
+Script Propertiesに以下を設定（実際の値は @README.md のセットアップ手順を参照）：
+
+```javascript
+NOTION_API_KEY: "secret_..."
+NOTION_DATA_SOURCE_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+GOOGLE_CALENDAR_ID: "abc123@group.calendar.google.com"
+```
+
+## 実装時の注意点
+
+### ⚠️ API実装時の必須手順（厳守）
+
+**API関連のコードを実装・修正する際は、必ず以下の手順を実行すること：**
+
+1. **公式APIリファレンスを開く**
+   - Notion APIの場合: 該当するエンドポイントの公式ドキュメントを開く
+     - 例: `createPage()` → https://developers.notion.com/reference/post-page
+   - Google Calendar APIの場合: 該当するメソッドの公式ドキュメントを開く
+     - 例: `Calendar.Events.insert` → https://developers.google.com/calendar/api/v3/reference/events/insert
+
+2. **リクエスト形式を公式ドキュメントと照合**
+   - パラメータ名が正しいか
+   - ネストされたオブジェクト構造が正しいか
+   - 必須パラメータが全て含まれているか
+   - 非推奨（deprecated）のパラメータを使っていないか
+
+3. **APIバージョンを確認**
+   - Notion: 必ず`v2025-09-03`を使用
+   - Google Calendar: `v3`を使用
+   - バージョン変更時の breaking changes を確認
+
+4. **実装後の確認**
+   - 公式ドキュメントのサンプルコードと比較
+   - リクエストペイロードの構造が一致しているか確認
+
+**❌ 絶対にやってはいけないこと：**
+- 過去の知識や記憶だけで実装する
+- 公式ドキュメントを確認せずにコードを書く
+- 古いAPIバージョンのパターンを流用する
+- 「たぶんこうだろう」という推測で実装する
+
+---
+
+### その他の注意点
+
+1. **ID相互参照による削除判定**
+   - Notion: 「Google Event ID」プロパティで相手のIDを保持
+   - Google Calendar: `description`フィールドの1行目に`Notion: {pageId}`を格納
+   - 削除判定: 相手のIDを持つが相手側に存在しない = 削除された
+
+2. **同期範囲の制限**
+   - 開始時刻が過去1ヶ月 ~ 未来2ヶ月の間にあるタスクのみ同期
+   - 開始時刻なしタスクは同期対象外
+
+3. **ステータスマッピング**
+   - Notion: ToDo/Done（2状態）
+   - Google Calendar: （将来実装予定）
+
+4. **日付・時刻形式**
+   - Notion: ISO 8601（日時含む、タイムゾーン情報あり）
+   - Google Calendar: RFC 3339（日時含む、タイムゾーン情報あり）
+   - タイムゾーン表記の統一が必要（`+00:00` → `Z`）
+
+5. **エラーハンドリング**
+   - 429エラー（レートリミット）の適切な処理
+   - ログ出力でデバッグしやすく
+
+## 禁止事項
+
+- ❌ 古いDatabases API (`/v1/databases/{database_id}/query`)を使用しない
+- ❌ Data Sources APIを使わずに直接データベースをクエリしない
+- ❌ ページ作成時に`parent.database_id`を使用（`parent.data_source_id`を使用すること）
+- ❌ レートリミットを無視した連続リクエスト
+- ❌ エラー処理なしのAPI呼び出し
+- ❌ ハードコードされたAPIキーやID
+- ❌ `.cursorrules`に実際の接続情報（API Key、Database ID等）を記載する
+
+## 推奨事項
+
+- ✅ `NOTION_DB_SCHEMA.md`を確認してプロパティ構造を理解
+- ✅ 各APIリファレンスで最新の仕様を確認
+- ✅ テスト関数で動作確認してから統合
+- ✅ ログ出力で処理の流れを追えるようにする
+- ✅ レートリミット対策を実装
+- ✅ Script Propertiesで設定を管理
+
+## ドキュメント更新ルール（重要）
+
+**コードを実装・修正した際は、必ず関連ドキュメントも同時に更新すること**
+
+### 更新が必要なドキュメント
+
+実装や修正を行う際、以下のドキュメントに影響がないか確認し、必要に応じて同時に更新してください：
+
+1. **`README.md`**
+   - 新しいファイルを追加した場合
+   - アーキテクチャやデータフローを変更した場合
+   - セットアップ手順や使用方法を変更した場合
+   - 実装状況（実装済み/未実装）を更新
+
+2. **`NOTION_DB_SCHEMA.md`**
+   - Notionデータベースのプロパティを追加・変更した場合
+   - プロパティのデータ構造を変更した場合
+   - データマッピングを変更した場合
+
+3. **`TEXT_CONVERSION_RULES.md`**
+   - テキスト変換ロジックを変更した場合
+   - 新しいブロックタイプに対応した場合
+   - 変換アルゴリズムを改善した場合
+   - Rich Text要素の扱いを変更した場合
+
+4. **`API_TEST.md`**
+   - 新しいAPIエンドポイントを使用した場合
+   - APIリクエストの形式を変更した場合
+   - テスト手順を追加・変更した場合
+
+5. **`.cursorrules`（このファイル）**
+   - 新しいコーディング規約を追加した場合
+   - プロジェクト構造を変更した場合
+   - データフロー・型定義を変更した場合
+
+### 更新手順
+
+```
+1. コードを実装・修正する
+2. 影響を受けるドキュメントを特定する
+3. ドキュメントを更新する
+4. コードとドキュメントを同時にコミット
+```
+
+### チェックリスト
+
+コードを変更した際は、以下を確認してください：
+
+- [ ] 新しいファイル・関数・データ型を追加したか？
+- [ ] データフローやアーキテクチャを変更したか？
+- [ ] APIの使用方法を変更したか？
+- [ ] 変換ロジックを変更したか？
+- [ ] 設定項目を追加・変更したか？
+
+該当する場合は、対応するドキュメントを更新すること。
+
+## 質問時のガイドライン
+
+コードや仕様について質問する際は：
+1. まず該当するドキュメント（README.md等）を確認
+2. APIリファレンスを確認
+3. 既存の実装（TaskData.gs等）を確認
+4. それでも不明な場合に質問
+
+実装提案時は：
+1. 既存のコーディング規約に従う
+2. エラーハンドリングを含める
+3. ログ出力を含める
+4. JSDocコメントを記述する
+5. テスト関数を提供する
+
+
