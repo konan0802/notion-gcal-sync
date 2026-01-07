@@ -68,51 +68,25 @@ NotionのタスクデータベースとGoogle Calendarを双方向で自動同�
 
 ## 重要な制限事項
 
-### Notion API
-- バージョン: **v2025-09-03必須**（Data Sources API使用）
-- レートリミット: 平均3リクエスト/秒（連続リクエスト時は350ms以上の間隔）
-- Database ID → Data Source IDの変換が必要
-- ページ本文（blocks）は別APIで取得（`/blocks/{page_id}/children`）
-- Blocks API: 最大100ブロック/リクエスト
+詳細は `@README.md` の「重要な制限事項」および「注意事項」セクションを参照してください。
 
-### Google Calendar API
-- レートリミット: 1,000,000 クエリ/日、100リクエスト/秒/ユーザー
-- 開始時刻・終了時刻を完全サポート
-- `description`フィールド: Notion Page IDとURLを格納
-
-### GAS
-- 実行時間制限: 6分/回
-- 1回の実行で最大250件のイベント/ページを処理（推奨）
+**重要ポイント:**
+- Notion API: **v2025-09-03必須**（Data Sources API使用）
+- Notion API: レートリミット対策（350ms間隔）が必要
+- Google Calendar: 専用カレンダーを使用（既存カレンダーとの混在は避ける）
+- GAS: 実行時間制限6分/回
 
 ## コーディング規約
 
-### ファイル構成
+### ファイル構成とデータフロー
 
-```
-gas/
-├── TaskData.gs              # 共通データ型と変換ロジック
-├── NotionService.gs         # Notion API専用
-├── GoogleCalendarService.gs # Google Calendar API専用
-└── Code.gs                  # メイン同期ロジック
-```
+詳細は `@README.md` の「アーキテクチャ概要」および「ファイル構成」セクションを参照してください。
 
-### データフロー
-
-```
-Notion Page (API Response)
-  ↓ TaskDataConverter.fromNotionPage(page)
-TaskData (統一形式)
-  ↓ TaskDataConverter.toGoogleEvent(taskData)
-Google Calendar Event (API Request)
-```
-
-```
-Google Calendar Event (API Response)
-  ↓ TaskDataConverter.fromGoogleEvent(googleEvent)
-TaskData (統一形式)
-  ↓ TaskDataConverter.toNotionProperties(taskData)
-Notion Page Properties (API Request)
-```
+**主要ファイル:**
+- `gas/TaskData.gs` - 共通データ型と変換ロジック
+- `gas/NotionService.gs` - Notion API操作
+- `gas/GoogleCalendarService.gs` - Google Calendar API操作
+- `gas/Code.gs` - メイン同期ロジック
 
 ### 命名規則
 
@@ -169,63 +143,25 @@ function functionName(paramName) {
 }
 ```
 
-## TaskData型定義
+## データ型と同期対象
 
-```typescript
-@typedef {Object} TaskData
-@property {string} id - データソースのプライマリID（Notion Page ID または Google Event ID）
-@property {string} title - タスク名（双方向同期）
-@property {string} status - ステータス（双方向同期）: ToDo/Done
-@property {string|null} startTime - 開始時刻（双方向同期）: ISO 8601形式（日時含む）
-@property {string|null} endTime - 終了時刻（双方向同期）: ISO 8601形式（日時含む）
-@property {string} lastEditedTime - 最終編集日時（同期判定用）: ISO 8601形式
-@property {string|null} notionUrl - NotionページURL（Notion → Google Calendarのdescription）
-@property {string|null} googleEventId - Google Calendar Event ID（マッピング用）
-@property {string|null} notionPageId - Notion Page ID（削除判定用）
-@property {string} source - データソース: 'notion' | 'google'
-```
+詳細は以下のドキュメントを参照してください：
 
-## 同期対象
-
-- **タイトル**: Notion「タスク名」 ↔ Google Calendar「summary」
-- **ステータス**: Notion「ステータス」(ToDo/Done) ↔ Google Calendar（将来実装予定）
-- **開始時刻**: Notion「日付.start」(ISO 8601) ↔ Google Calendar「start.dateTime」(RFC 3339)
-- **終了時刻**: Notion「日付.end」(ISO 8601) ↔ Google Calendar「end.dateTime」(RFC 3339)
-- **ID相互参照**:
-  - Notion→Google: 「Google Event ID」プロパティ（rich_text）
-  - Google→Notion: `description`フィールドに`Notion: {pageId}\n{url}`を格納
+- **TaskData型定義**: `@gas/TaskData.gs` の冒頭コメント
+- **同期対象フィールド**: `@README.md` の「データマッピング」セクション
+- **Notionプロパティ構造**: `@NOTION_DB_SCHEMA.md`
 
 ## テスト
 
-### 単体テスト関数
+### テスト関数
 
-各サービスに`test*`関数を実装：
+各サービスファイル（`NotionService.gs`、`GoogleCalendarService.gs`）に`test*`プレフィックスのテスト関数があります。
 
-```javascript
-// NotionService.gs
-testQueryRecentTasks()
-testCreatePage()
-testUpdatePage()
-testDebugTaskDateTime()
-runAllNotionTests()
+### テスト実行
 
-// GoogleCalendarService.gs
-testListRecentEvents()
-testCreateEvent()
-testTaskDataConverterForCalendar()
-testDebugGoogleEventDateTime()
-runAllGoogleCalendarTests()
-```
-
-### テスト実行前の準備
-
-Script Propertiesに以下を設定（実際の値は @README.md のセットアップ手順を参照）：
-
-```javascript
-NOTION_API_KEY: "secret_..."
-NOTION_DATA_SOURCE_ID: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-GOOGLE_CALENDAR_ID: "abc123@group.calendar.google.com"
-```
+1. Script Propertiesの設定（詳細は `@README.md` のセットアップ手順を参照）
+2. 各テスト関数を実行
+3. ログで結果を確認
 
 ## 実装時の注意点
 
@@ -264,25 +200,14 @@ GOOGLE_CALENDAR_ID: "abc123@group.calendar.google.com"
 
 ### その他の注意点
 
-1. **ID相互参照による削除判定**
-   - Notion: 「Google Event ID」プロパティで相手のIDを保持
-   - Google Calendar: `description`フィールドの1行目に`Notion: {pageId}`を格納
-   - 削除判定: 相手のIDを持つが相手側に存在しない = 削除された
+1. **同期ロジックの詳細**
+   - 同期範囲、削除判定、ステータスマッピング等は `@README.md` の「同期フロー」セクションを参照
 
-2. **同期範囲の制限**
-   - 開始時刻が過去1ヶ月 ~ 未来2ヶ月の間にあるタスクのみ同期
-   - 開始時刻なしタスクは同期対象外
+2. **日付形式の変換**
+   - Notion（包含的）とGoogle Calendar（排他的）の形式変換は `@NOTION_DB_SCHEMA.md` を参照
+   - 実装は `TaskDataConverter.toNotionProperties()` と `TaskDataConverter.toGoogleEvent()` を参照
 
-3. **ステータスマッピング**
-   - Notion: ToDo/Done（2状態）
-   - Google Calendar: （将来実装予定）
-
-4. **日付・時刻形式**
-   - Notion: ISO 8601（日時含む、タイムゾーン情報あり）
-   - Google Calendar: RFC 3339（日時含む、タイムゾーン情報あり）
-   - タイムゾーン表記の統一が必要（`+00:00` → `Z`）
-
-5. **エラーハンドリング**
+3. **エラーハンドリング**
    - 429エラー（レートリミット）の適切な処理
    - ログ出力でデバッグしやすく
 
