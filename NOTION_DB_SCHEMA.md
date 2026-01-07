@@ -111,25 +111,12 @@ Data Source ID:  3f19b18a-0c1c-4672-bef6-c90e7b784e3a
 - **Property Name**: `日付`
 - **Property ID**: `RR~v`
 - **Type**: `date`
-- **説明**: タスクの開始日時と終了日時（start/endの両方を含む）
+- **説明**: タスクの開始日と終了日（日付のみ、時刻情報は使用しない）
 - **Null許可**: Yes
-- **時刻含む**: Yes（時刻指定イベントの場合）
-- **終日イベント対応**: Yes
+- **時刻含む**: No（日付のみを管理）
+- **終日イベント専用**: Yes
 
-**時刻指定イベント（time_zone="Asia/Tokyo"）:**
-```json
-"日付": {
-  "id": "RR~v",
-  "type": "date",
-  "date": {
-    "start": "2026-01-03T10:00:00.000",
-    "end": "2026-01-03T15:00:00.000",
-    "time_zone": "Asia/Tokyo"
-  }
-}
-```
-
-**終日イベント（time_zone=null）:**
+**1日のタスク（endなし）:**
 ```json
 "日付": {
   "id": "RR~v",
@@ -142,7 +129,7 @@ Data Source ID:  3f19b18a-0c1c-4672-bef6-c90e7b784e3a
 }
 ```
 
-**複数日の終日イベント（time_zone=null）:**
+**複数日のタスク（endあり）:**
 ```json
 "日付": {
   "id": "RR~v",
@@ -154,6 +141,13 @@ Data Source ID:  3f19b18a-0c1c-4672-bef6-c90e7b784e3a
   }
 }
 ```
+
+**注意:**
+- 本ツールは**日付のみ**を管理します（時刻情報は無視）
+- Notionで時刻を設定しても、同期時に日付部分のみが使用されます
+- 日付形式は常に`YYYY-MM-DD`（ISO 8601の日付部分のみ）
+- `time_zone`は常に`null`として扱います
+- Google Calendarでは常に**終日イベント**として同期されます
 
 **Null時:**
 ```json
@@ -222,11 +216,16 @@ Data Source ID:  3f19b18a-0c1c-4672-bef6-c90e7b784e3a
 | タスク名（title） | summary | `▶ `（ToDo）または`✔ `（Done）プレフィックス付き |
 | ステータス（ToDo） | summary（▶プレフィックス） | `▶ タスク名`形式 |
 | ステータス（Done） | summary（✔プレフィックス） | `✔ タスク名`形式 |
-| 日付.start（時刻指定） | start.dateTime | ISO 8601形式（UTC）、`timeZone: "Asia/Tokyo"` |
-| 日付.end（時刻指定） | end.dateTime | ISO 8601形式（UTC）、`timeZone: "Asia/Tokyo"` |
-| 日付.start（終日） | start.date | YYYY-MM-DD形式 |
-| 日付.end（終日） | end.date | YYYY-MM-DD形式（Google Calendarの排他的形式に+1日調整） |
+| 日付.start | start.date | YYYY-MM-DD形式（常に終日イベント） |
+| 日付.end | end.date | YYYY-MM-DD形式（Notionの包含的→Google Calendarの排他的形式に+1日調整） |
 | ページURL | description | `Notion: PAGE_ID\nURL`形式で設定 |
+
+**注意:**
+- すべてのタスクは終日イベントとして同期されます
+- Notionで時刻を設定しても、日付部分のみが使用されます
+- Notionの日付範囲は包含的（inclusive）形式（例：12/27-12/28 = 2日間）
+- Google Calendarは排他的（exclusive）形式（例：start=12/27, end=12/29 = 2日間）
+- 変換時に自動的に+1日調整されます
 
 ### Google Calendar → Notion
 
@@ -235,12 +234,14 @@ Data Source ID:  3f19b18a-0c1c-4672-bef6-c90e7b784e3a
 | summary | タスク名（title） | `▶ `または`✔ `プレフィックスを除去 |
 | summary（▶プレフィックス） | ステータス（ToDo） | プレフィックスから判定 |
 | summary（✔プレフィックス） | ステータス（Done） | プレフィックスから判定 |
-| start.dateTime（時刻指定） | 日付.start | ISO 8601形式（`time_zone: "Asia/Tokyo"`） |
-| end.dateTime（時刻指定） | 日付.end | ISO 8601形式（`time_zone: "Asia/Tokyo"`） |
-| start.date（終日） | 日付.start | YYYY-MM-DD形式（`time_zone: null`） |
-| end.date（終日） | 日付.end | YYYY-MM-DD形式（Google Calendarの排他的形式から-1日調整、`time_zone: null`） |
+| start.date | 日付.start | YYYY-MM-DD形式（`time_zone: null`） |
+| end.date | 日付.end | YYYY-MM-DD形式（Google Calendarの排他的形式→Notionの包含的形式に-1日調整、`time_zone: null`） |
 | id | Google Event ID | マッピング・削除判定用に保存 |
 | description | （同期しない） | NotionページIDとURLが入っているため同期対象外 |
+
+**注意:**
+- Google Calendarからの同期も終日イベントのみを対象とします
+- dateTimeフィールドを持つ時刻指定イベントは、日付部分のみが抽出されます（本来は発生しないはず）
 
 ---
 

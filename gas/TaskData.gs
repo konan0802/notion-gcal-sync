@@ -20,8 +20,8 @@
  *   - source='google'の場合: Google Calendar Event ID
  * @property {string} title - タスク名（双方向同期）
  * @property {string} status - ステータス（双方向同期）: ToDo/Done
- * @property {string|null} startTime - 開始日時（双方向同期）: ISO 8601形式
- * @property {string|null} endTime - 終了日時（双方向同期）: ISO 8601形式
+ * @property {string|null} startDate - 開始日付（双方向同期）: YYYY-MM-DD形式（日付のみ）
+ * @property {string|null} endDate - 終了日付（双方向同期）: YYYY-MM-DD形式（日付のみ、排他的）
  * @property {string} lastEditedTime - 最終編集日時（同期判定用）: ISO 8601形式
  * @property {string|null} notionUrl - NotionページURL（Notion → Google Calendarのdescription）
  * @property {string|null} googleEventId - Google Calendar Event ID（マッピング用）
@@ -62,32 +62,29 @@ const TaskDataConverter = {
     const statusProp = properties['ステータス'];
     const status = statusProp?.status?.name || 'ToDo';
     
-    // 日付プロパティから開始時刻・終了時刻を取得
+    // 日付プロパティから開始日・終了日を取得（日付のみ、時刻なし）
     const dateProp = properties['日付'];
     const dateData = dateProp?.date;
-    let startTime = null;
-    let endTime = null;
+    let startDate = null;
+    let endDate = null;
     
     if (dateData) {
-      // 開始時刻（start）
+      // 開始日（start）- 日付のみ（YYYY-MM-DD形式）
       if (dateData.start) {
-        // タイムゾーン表記を統一（+09:00などをZ形式に変換）
-        startTime = TaskDataConverter._normalizeDateTime(dateData.start);
+        // 日付のみを抽出（時刻情報があっても無視）
+        startDate = dateData.start.split('T')[0];
       }
       
-      // 終了時刻（end）
+      // 終了日（end）- 日付のみ（YYYY-MM-DD形式）
       if (dateData.end) {
-        endTime = TaskDataConverter._normalizeDateTime(dateData.end);
+        const notionEndDate = dateData.end.split('T')[0];
         
-        // Notionの終日イベントは包含的（inclusive）、Google Calendarは排他的（exclusive）
+        // Notionの日付範囲は包含的（inclusive）、Google Calendarは排他的（exclusive）
         // TaskDataは排他的形式で統一するため、Notionのendに+1日する
-        // 例：Notion start=12/27, end=12/28（2日間） → TaskData end=12/29T00:00Z
-        // 時刻指定イベント（time_zone != null）の場合は変換不要
-        if (dateData.time_zone === null && endTime && endTime.match(/T00:00:00\.000Z$/)) {
-          const endDateObj = new Date(endTime);
-          endDateObj.setDate(endDateObj.getDate() + 1); // +1日（排他的形式に変換）
-          endTime = endDateObj.toISOString();
-        }
+        // 例：Notion start=12/27, end=12/28（2日間） → TaskData end=12/29
+        const endDateObj = new Date(notionEndDate + 'T00:00:00Z');
+        endDateObj.setDate(endDateObj.getDate() + 1); // +1日（排他的形式に変換）
+        endDate = endDateObj.toISOString().split('T')[0]; // YYYY-MM-DD
       }
     }
     
@@ -98,8 +95,8 @@ const TaskDataConverter = {
       id: page.id, // Notion Page ID
       title: title,
       status: status,
-      startTime: startTime,
-      endTime: endTime,
+      startDate: startDate,
+      endDate: endDate,
       lastEditedTime: lastEditedTime,
       notionUrl: page.url,
       googleEventId: googleEventId,
@@ -205,62 +202,39 @@ const TaskDataConverter = {
       };
     }
     
-    // 日付（開始時刻と終了時刻を含む）
-    if (taskData.startTime || taskData.endTime) {
-      // 終日イベント判定（00:00:00Z で終わる場合）
-      const isAllDay = taskData.startTime && taskData.startTime.match(/T00:00:00\.000Z$/);
+    // 日付（開始日と終了日、日付のみで時刻なし）
+    if (taskData.startDate) {
+      let notionEndDate = null;
       
-      if (isAllDay) {
-        // 終日イベントの場合は日付のみ（時刻なし）でNotionに保存
-        const startDate = taskData.startTime.split('T')[0]; // YYYY-MM-DD
-        let endDate = null;
+      if (taskData.endDate) {
+        // TaskDataは排他的（exclusive）形式
+        // Notionは包含的（inclusive）形式
+        // TaskDataのendから-1日してNotionに保存
+        // 例：TaskData end=12/29 → Notion end=12/28（12/27-12/28の2日間）
         
-        if (taskData.endTime) {
-          // TaskDataは排他的（exclusive）形式
-          // Notionは包含的（inclusive）形式
-          // TaskDataのendから-1日してNotionに保存
-          // 例：TaskData end=12/29T00:00Z → Notion end=12/28（12/27-12/28の2日間）
-          
-          const endDateObj = new Date(taskData.endTime.split('T')[0]);
-          const startDateObj = new Date(startDate);
-          const dayDiff = (endDateObj - startDateObj) / (1000 * 60 * 60 * 24);
-          
-          if (dayDiff <= 1) {
-            // 1日以内の差 = 1日間の終日イベント
-            // Notionでは end=null にする
-            endDate = null;
-          } else {
-            // 2日以上の差 = 複数日の終日イベント
-            // TaskDataの排他的endから-1日してNotionの包含的endにする
-            const notionEndDate = new Date(endDateObj.getTime() - 1000 * 60 * 60 * 24);
-            endDate = notionEndDate.toISOString().split('T')[0];
-          }
+        const endDateObj = new Date(taskData.endDate + 'T00:00:00Z');
+        const startDateObj = new Date(taskData.startDate + 'T00:00:00Z');
+        const dayDiff = (endDateObj - startDateObj) / (1000 * 60 * 60 * 24);
+        
+        if (dayDiff <= 1) {
+          // 1日以内の差 = 1日間のイベント
+          // Notionでは end=null にする
+          notionEndDate = null;
+        } else {
+          // 2日以上の差 = 複数日のイベント
+          // TaskDataの排他的endから-1日してNotionの包含的endにする
+          const notionEndDateObj = new Date(endDateObj.getTime() - 1000 * 60 * 60 * 24);
+          notionEndDate = notionEndDateObj.toISOString().split('T')[0]; // YYYY-MM-DD
         }
-        
-        properties['日付'] = {
-          date: {
-            start: startDate, // 日付のみ
-            end: endDate,     // 日付のみ（または null）
-            time_zone: null   // 終日イベントはタイムゾーンなし
-          }
-        };
-      } else {
-        // 時刻指定イベントの場合は時刻を含めて保存
-        // Notionはタイムゾーンをローカル時刻として解釈するため、
-        // UTC時刻をJSTに変換せず、タイムゾーン付きの文字列として渡す
-        
-        // UTC時刻をJST時刻に変換（+09:00形式）
-        const startJST = taskData.startTime ? TaskDataConverter._convertToTimeZone(taskData.startTime, 'Asia/Tokyo') : null;
-        const endJST = taskData.endTime ? TaskDataConverter._convertToTimeZone(taskData.endTime, 'Asia/Tokyo') : null;
-        
-        properties['日付'] = {
-          date: {
-            start: startJST,
-            end: endJST,
-            time_zone: 'Asia/Tokyo'  // JST (GMT+9) で保存
-          }
-        };
       }
+      
+      properties['日付'] = {
+        date: {
+          start: taskData.startDate, // YYYY-MM-DD形式
+          end: notionEndDate,         // YYYY-MM-DD形式（または null）
+          time_zone: null             // 日付のみの場合は常にnull
+        }
+      };
     } else {
       properties['日付'] = {
         date: null
@@ -290,25 +264,28 @@ const TaskDataConverter = {
     }
     // プレフィックスがない場合はデフォルトで ToDo
     
-    // 開始時刻取得（UTCに統一）
-    let startTime = null;
+    // 開始日取得（日付のみ、YYYY-MM-DD形式）
+    let startDate = null;
     if (googleEvent.start) {
-      if (googleEvent.start.dateTime) {
-        startTime = TaskDataConverter._normalizeDateTime(googleEvent.start.dateTime);
-      } else if (googleEvent.start.date) {
-        // 終日イベントの場合は日付のみ
-        startTime = googleEvent.start.date + 'T00:00:00.000Z';
+      if (googleEvent.start.date) {
+        // 終日イベントの場合（date フィールド）
+        startDate = googleEvent.start.date; // YYYY-MM-DD
+      } else if (googleEvent.start.dateTime) {
+        // 時刻指定イベントの場合は日付のみを抽出（本来は発生しないはず）
+        startDate = googleEvent.start.dateTime.split('T')[0];
       }
     }
     
-    // 終了時刻取得（UTCに統一）
-    let endTime = null;
+    // 終了日取得（日付のみ、YYYY-MM-DD形式、排他的）
+    let endDate = null;
     if (googleEvent.end) {
-      if (googleEvent.end.dateTime) {
-        endTime = TaskDataConverter._normalizeDateTime(googleEvent.end.dateTime);
-      } else if (googleEvent.end.date) {
-        // 終日イベントの場合は日付のみ
-        endTime = googleEvent.end.date + 'T00:00:00.000Z';
+      if (googleEvent.end.date) {
+        // 終日イベントの場合（date フィールド）
+        // Google Calendarは排他的（exclusive）形式なので、そのまま使用
+        endDate = googleEvent.end.date; // YYYY-MM-DD
+      } else if (googleEvent.end.dateTime) {
+        // 時刻指定イベントの場合は日付のみを抽出（本来は発生しないはず）
+        endDate = googleEvent.end.dateTime.split('T')[0];
       }
     }
     
@@ -328,8 +305,8 @@ const TaskDataConverter = {
       id: googleEvent.id, // Google Calendar Event ID
       title: title, // プレフィックス除去済み
       status: status, // プレフィックスから判定
-      startTime: startTime,
-      endTime: endTime,
+      startDate: startDate,
+      endDate: endDate,
       lastEditedTime: lastEditedTime,
       notionUrl: null, // Google Calendarから作成された場合は後で設定
       googleEventId: googleEvent.id, // idと同じ値
@@ -339,7 +316,7 @@ const TaskDataConverter = {
   },
 
   /**
-   * TaskDataからGoogle Calendar Event形式を生成
+   * TaskDataからGoogle Calendar Event形式を生成（終日イベントのみ）
    * @param {TaskData} taskData - 共通タスクデータ
    * @returns {Object} Google Calendar Eventオブジェクト
    */
@@ -357,85 +334,51 @@ const TaskDataConverter = {
       googleEvent.summary = prefix + taskData.title;
     }
     
-    // 開始時刻と終了時刻
-    if (taskData.startTime) {
-      // 時刻が 00:00:00Z（UTC 0時）の場合は終日イベントとして扱う
-      const isAllDay = taskData.startTime.match(/T00:00:00\.000Z$/);
+    // 開始日と終了日（常に終日イベント）
+    if (taskData.startDate) {
+      // 終日イベント形式（dateフィールドのみ使用、dateTime/timeZoneは明示的にnull）
+      googleEvent.start = { 
+        date: taskData.startDate, // YYYY-MM-DD
+        dateTime: null,           // 既存の dateTime をクリア
+        timeZone: null            // 既存の timeZone をクリア
+      };
       
-      if (isAllDay) {
-        // 終日イベント形式（dateTime フィールドを明示的にクリア）
-        const startDate = taskData.startTime.split('T')[0]; // YYYY-MM-DD
-        googleEvent.start = { 
-          date: startDate,
-          dateTime: null, // 既存の dateTime をクリア
-          timeZone: null  // 既存の timeZone をクリア
+      // 終日イベントのendは排他的（exclusive）
+      // TaskDataも排他的形式なので、そのまま使用
+      if (taskData.endDate) {
+        // endDateがある場合（複数日イベント）
+        googleEvent.end = { 
+          date: taskData.endDate, // YYYY-MM-DD（排他的）
+          dateTime: null,
+          timeZone: null
         };
-        
-        // 終日イベントのendは排他的（exclusive）
-        // TaskDataも排他的形式なので、そのまま使用
-        if (taskData.endTime && taskData.endTime.match(/T00:00:00\.000Z$/)) {
-          // endTimeがある場合（複数日イベント）
-          googleEvent.end = { 
-            date: taskData.endTime.split('T')[0],  // そのまま使用
-            dateTime: null,
-            timeZone: null
-          };
-        } else if (!taskData.endTime) {
-          // endTimeがnull = 1日間の終日イベント（Notionでend未設定）
-          // Google Calendarでは翌日の日付を設定
-          const endDateObj = new Date(startDate);
-          endDateObj.setDate(endDateObj.getDate() + 1);
-          const endDate = endDateObj.toISOString().split('T')[0];
-          
-          googleEvent.end = { 
-            date: endDate,  // 翌日
-            dateTime: null,
-            timeZone: null
-          };
-        } else {
-          // endTimeが00:00:00Zではない場合（時刻指定イベント、通常ありえない）
-          googleEvent.end = { 
-            date: startDate,
-            dateTime: null,
-            timeZone: null
-          };
-        }
       } else {
-        // 通常の時刻指定イベント（date フィールドを明示的にクリア）
-        googleEvent.start = {
-          dateTime: taskData.startTime,
-          timeZone: 'Asia/Tokyo',
-          date: null // 既存の date をクリア
-        };
+        // endDateがnull = 1日間のイベント
+        // Google Calendarでは翌日の日付を設定（排他的）
+        const endDateObj = new Date(taskData.startDate + 'T00:00:00Z');
+        endDateObj.setDate(endDateObj.getDate() + 1);
+        const endDate = endDateObj.toISOString().split('T')[0]; // YYYY-MM-DD
         
-        // 終了時刻がない場合は、開始時刻の1時間後をデフォルトとする
-        if (taskData.endTime) {
-          googleEvent.end = {
-            dateTime: taskData.endTime,
-            timeZone: 'Asia/Tokyo',
-            date: null
-          };
-        } else {
-          // endTimeがない場合は、startTimeの1時間後を設定
-          const startDate = new Date(taskData.startTime);
-          const endDate = new Date(startDate.getTime() + 60 * 60 * 1000); // 1時間後
-          googleEvent.end = {
-            dateTime: endDate.toISOString(),
-            timeZone: 'Asia/Tokyo',
-            date: null
-          };
-        }
+        googleEvent.end = { 
+          date: endDate,  // 翌日
+          dateTime: null,
+          timeZone: null
+        };
       }
     } else {
-      // startTimeがない場合は終日イベントとして扱う（本来は同期対象外のはず）
+      // startDateがない場合は今日の日付を使用（本来は同期対象外のはず）
       const today = new Date().toISOString().split('T')[0];
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const tomorrowDate = tomorrow.toISOString().split('T')[0];
+      
       googleEvent.start = { 
         date: today,
         dateTime: null,
         timeZone: null
       };
       googleEvent.end = { 
-        date: today,
+        date: tomorrowDate, // 翌日（排他的）
         dateTime: null,
         timeZone: null
       };

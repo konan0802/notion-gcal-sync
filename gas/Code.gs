@@ -170,7 +170,7 @@ function categorizeTasks(notionTasksMap, googleTasksMap, googleEventIdToNotionMa
 
 /**
  * タスクの内容が異なるかチェック
- * title, status, startTime, endTimeの4つのフィールドで判定
+ * title, status, startDate, endDateの4つのフィールドで判定
  * @param {TaskData} notionTask - Notionタスク
  * @param {TaskData} googleEvent - Google Calendarイベント
  * @returns {boolean} 内容が異なる場合true
@@ -178,10 +178,10 @@ function categorizeTasks(notionTasksMap, googleTasksMap, googleEventIdToNotionMa
 function hasContentChanged(notionTask, googleEvent) {
   const titleChanged = notionTask.title !== googleEvent.title;
   const statusChanged = notionTask.status !== googleEvent.status;
-  const startTimeChanged = notionTask.startTime !== googleEvent.startTime;
-  const endTimeChanged = notionTask.endTime !== googleEvent.endTime;
+  const startDateChanged = notionTask.startDate !== googleEvent.startDate;
+  const endDateChanged = notionTask.endDate !== googleEvent.endDate;
   
-  return titleChanged || statusChanged || startTimeChanged || endTimeChanged;
+  return titleChanged || statusChanged || startDateChanged || endDateChanged;
 }
 
 // ========================================
