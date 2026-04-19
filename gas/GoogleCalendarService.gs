@@ -21,6 +21,16 @@ const GOOGLE_CALENDAR_CONFIG = {
   RATE_LIMIT_DELAY: 0 // 十分な余裕があるため遅延不要
 };
 
+/**
+ * イベントの表示色IDを取得（Script Propertyから）
+ * Google Calendar API の colorId（1〜11）に対応
+ * @see https://developers.google.com/calendar/api/v3/reference/colors
+ * @returns {string|null} colorId（未設定の場合はnull）
+ */
+function _getEventColorId() {
+  return PropertiesService.getScriptProperties().getProperty('GOOGLE_EVENT_COLOR_ID') || null;
+}
+
 // ========================================
 // イベント取得
 // ========================================
@@ -95,6 +105,11 @@ function createEvent(eventData) {
       googleEventData = TaskDataConverter.toGoogleEvent(eventData);
     }
     
+    const colorId = _getEventColorId();
+    if (colorId) {
+      googleEventData.colorId = colorId;
+    }
+    
     const event = Calendar.Events.insert(googleEventData, calendarId);
     
     Logger.log(`[GoogleCalendarService] Event created: ${event.id}`);
@@ -127,6 +142,11 @@ function updateEvent(eventId, eventData) {
     let googleEventData = eventData;
     if (eventData.source) {
       googleEventData = TaskDataConverter.toGoogleEvent(eventData);
+    }
+    
+    const colorId = _getEventColorId();
+    if (colorId) {
+      googleEventData.colorId = colorId;
     }
     
     const event = Calendar.Events.patch(googleEventData, calendarId, eventId);

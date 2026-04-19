@@ -64,7 +64,26 @@ Notionで作成・更新・削除されたタスクは、Google Calendarに反�
 NOTION_API_KEY: secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
 NOTION_DATA_SOURCE_ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 GOOGLE_CALENDAR_ID: abc123@group.calendar.google.com
+GOOGLE_EVENT_COLOR_ID: 11  （任意。イベントの表示色。下記参照）
 ```
+
+**GOOGLE_EVENT_COLOR_ID（任意）:**
+
+イベントの表示色をカスタマイズできます。未設定の場合はカレンダーのデフォルト色が使われます。
+
+| ID | 色 |
+|----|------|
+| 1 | Lavender |
+| 2 | Sage |
+| 3 | Grape |
+| 4 | Flamingo |
+| 5 | Banana |
+| 6 | Tangerine |
+| 7 | Peacock |
+| 8 | Graphite |
+| 9 | Blueberry |
+| 10 | Basil |
+| 11 | **Tomato（赤）** |
 
 ### 6. Notionデータベースのプロパティ設定
 
